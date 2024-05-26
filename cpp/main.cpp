@@ -145,132 +145,132 @@ void Gaussion_simp(const Mat& src, Mat& res, const Mat& mask)
 
 	auto finish_clock = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds> (finish_clock - start_clock);
-	std::cout << double(duration.count()) << std::endl;
+	std::cout << "simple"  << double(duration.count()) << "ns" << std::endl;
 }
 
-void Gaussion_xy(const Mat& src, Mat& res, const int msize , const double sigma)
+void Gaussion_xy(const Mat& src, Mat& res, const int msize, const double sigma)
 {
 	Mat mask;
 	Mat new_src;
 	std::vector<Mat> channels_;
-
-	//生成一维核
+	// Generating the 1D mask
 	Generate_Gaussion_Mask(mask, msize, sigma);
-	//先横向处理
+
+	// Padding the source image
+	int border = (msize - 1) / 2;
+	copyMakeBorder(src, new_src, border, border, border, border, BORDER_REPLICATE);
+
+	// Initializing the result image
+	res = Mat::zeros(src.size(), src.type());
+	int sum = 0;
 
 	auto start_clock = std::chrono::high_resolution_clock::now();
 
-
-	int border = (msize - 1) / 2;
-	res = Mat::zeros(src.size(), src.type());
-	copyMakeBorder(src, new_src, border, border, border, border, BORDER_REPLICATE);
-
-
-	for (int i = border; i < src.rows + border; i++)
-	{
-		for (int j = border; j < src.cols + border; j++)
+		// Process the assigned rows
+		for (int i = border; i <src.rows + border; i++)
 		{
-			double sum[3] = { 0 };
-			for (int r = -border; r <= border; r++)
+			for (int j = border; j < src.cols + border; j++)
 			{
-				if (src.channels() == 1)
+				double sum[3] = { 0 };
+				//#pragma omp simd
+				for (int r = -border; r <= border; r++)
 				{
-					sum[0] += new_src.ptr<uchar>(i)[j + r] * mask.ptr<double>(0)[r + border];
-					//sum[0] += new_src.at<uchar>(i, j + r) * mask.at<double>(0, r + border);
-				}
-				else if (src.channels() == 3)
-				{
-					split(new_src, channels_);
-					double rgb_0 = channels_.at(0).ptr<uchar>(0)[r + border];
-					double rgb_1 = channels_.at(1).ptr<uchar>(0)[r + border];
-					double rgb_2 = channels_.at(2).ptr<uchar>(0)[r + border];
-					sum[0] += rgb_0 * mask.at<double>(0, r + border);
-					sum[1] += rgb_1 * mask.at<double>(0, r + border);
-					sum[2] += rgb_2 * mask.at<double>(0, r + border);
-				}
-			}
-			if (new_src.channels() == 3)
-			{
-				for (int i = 0; i < 3; i++)
-				{
-					if (sum[i] < 0)
+					if (src.channels() == 1)
 					{
-						sum[i] = 0;
+						sum[0] += new_src.ptr<uchar>(i)[j + r] * mask.ptr<double>(0)[r + border];
 					}
-					if (sum[i] > 255)
+					else if (src.channels() == 3)
 					{
-						sum[i] = 255;
+						Vec3b rgb = new_src.ptr<Vec3b>(i + r)[j];
+						sum[0] += rgb[0] * mask.ptr<double>(0)[r + border]; //B
+						sum[1] += rgb[1] * mask.ptr<double>(0)[r + border]; //G
+						sum[2] += rgb[2] * mask.ptr<double>(0)[r + border]; //R
 					}
 				}
-			}
+				if (new_src.channels() == 3)
+				{
+					for (int i = 0; i < 3; i++)
+					{
+						if (sum[i] < 0)
+						{
+							sum[i] = 0;
+						}
+						if (sum[i] > 255)
+						{
+							sum[i] = 255;
+						}
+					}
+				}
 
-			if (new_src.channels() == 1)
-			{
-				res.at<uchar>(i - border, j - border) = sum[0];
-			}
-			else if (new_src.channels() == 3)
-			{
-				Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
-				res.at<Vec3b>(i - border, j - border) = rgb;
+				if (new_src.channels() == 1)
+				{
+					res.at<uchar>(i - border, j - border) = sum[0];
+				}
+				else if (new_src.channels() == 3)
+				{
+					Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
+					res.at<Vec3b>(i - border, j - border) = rgb;
+				}
 			}
 		}
-	}
 
+	// Padding the result image
 	copyMakeBorder(res, new_src, border, border, border, border, BORDER_REPLICATE);
-	for (int i = border; i < src.rows + border; i++)
-	{
-		for (int j = border; j < src.cols + border; j++)
+
+		// Process the assigned rows
+		for (int i = border; i < src.rows + border; i++)
 		{
-			double sum[3] = { 0 };
-			for (int c = -border; c <= border; c++)
+			for (int j = border; j < src.cols + border; j++)
 			{
-				if (src.channels() == 1)
+				double sum[3] = { 0 };
+				uchar* matrix = new_src.data;
+				int height = new_src.rows;
+				int width = new_src.cols;
+				//#pragma omp simd
+				for (int c = -border; c <= border; c++)
 				{
-					sum[0] += new_src.ptr<uchar>(i + c)[j] * mask.ptr<double>(0)[c + border];
-					//sum[0] += new_src.at<uchar>(i + c, j) * mask.at<double>(0, c + border);
-				}
-				else if (src.channels() == 3)
-				{
-					split(new_src, channels_);
-					double rgb_0 = channels_.at(0).ptr<uchar>(0)[c + border];
-					double rgb_1 = channels_.at(1).ptr<uchar>(0)[c + border];
-					double rgb_2 = channels_.at(2).ptr<uchar>(0)[c + border];
-					//Vec3b rgb = new_src.at<Vec3b>(i + c, j);
-					sum[0] += rgb_0 * mask.at<double>(0, c + border);
-					sum[1] += rgb_1 * mask.at<double>(0, c + border);
-					sum[2] += rgb_2 * mask.at<double>(0, c + border);
-				}
-			}
-			if (new_src.channels() == 3)
-			{
-				for (int i = 0; i < 3; i++)
-				{
-					if (sum[i] < 0)
+					if (src.channels() == 1)
 					{
-						sum[i] = 0;
+						sum[0] += new_src.ptr<uchar>(i + c)[j] * mask.ptr<double>(0)[c + border];
 					}
-					if (sum[i] > 255)
+					else if (src.channels() == 3)
 					{
-						sum[i] = 255;
+						Vec3b rgb = new_src.ptr<Vec3b>(i)[j + c];
+						sum[0] += rgb[0] * mask.ptr<double>(0)[c + border]; //B
+						sum[1] += rgb[1] * mask.ptr<double>(0)[c + border]; //G
+						sum[2] += rgb[2] * mask.ptr<double>(0)[c + border]; //R
 					}
 				}
-			}
+				if (new_src.channels() == 3)
+				{
+					for (int i = 0; i < 3; i++)
+					{
+						if (sum[i] < 0)
+						{
+							sum[i] = 0;
+						}
+						if (sum[i] > 255)
+						{
+							sum[i] = 255;
+						}
+					}
+				}
 
-			if (new_src.channels() == 1)
-			{
-				res.at<uchar>(i - border, j - border) = sum[0];
+				if (new_src.channels() == 1)
+				{
+					res.at<uchar>(i - border, j - border) = sum[0];
+				}
+				else if (new_src.channels() == 3)
+				{
+					Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
+					res.at<Vec3b>(i - border, j - border) = rgb;
+				}
 			}
-			else if (new_src.channels() == 3)
-			{
-				Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
-				res.at<Vec3b>(i - border, j - border) = rgb;
-			}
-
 		}
-	}
+
 	auto finish_clock = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds> (finish_clock - start_clock);
-	std::cout << "xy分离情况"<< double(duration.count()) << std::endl;
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(finish_clock - start_clock);
+	std::cout << "xy分离优化" << double(duration.count()) << "ns" << std::endl;
 }
 
 
@@ -364,7 +364,7 @@ void Gaussion_xy_SSE(const Mat& src, Mat& res, const int msize, const double sig
 
 
 
-void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sigma)
+void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sigma , int thread_n)
 {
 	Mat mask;
 	Mat new_src;
@@ -379,7 +379,7 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 	// Initializing the result image
 	res = Mat::zeros(src.size(), src.type());
 	int sum = 0;
-#pragma omp parallel num_threads(4)
+#pragma omp parallel num_threads(16) reduction(+:sum)
 	{
 		int num_threads = omp_get_num_threads();
 		//std::cout << num_threads << std::endl;
@@ -387,14 +387,14 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 		int rows_per_thread = src.rows / num_threads;
 		int start_row = thread_id * rows_per_thread;
 		int end_row = (thread_id == num_threads - 1) ? src.rows : start_row + rows_per_thread;
-		for (int i = 0; i < 1000000; i++)
+		for (int i = start_row; i < end_row; i++)
 		{
-			sum += i;
+			sum++;
 		}
 	}
 	auto start_clock = std::chrono::high_resolution_clock::now();
 
-#pragma omp parallel num_threads(4)
+#pragma omp parallel num_threads(thread_n)
 	{
 		int num_threads = omp_get_num_threads();
 		//std::cout << num_threads << std::endl;
@@ -411,22 +411,19 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 			for (int j = border; j < src.cols + border; j++)
 			{
 				double sum[3] = { 0 };
+//#pragma omp simd
 				for (int r = -border; r <= border; r++)
 				{
 					if (src.channels() == 1)
 					{
 						sum[0] += new_src.ptr<uchar>(i)[j + r] * mask.ptr<double>(0)[r + border];
-						//sum[0] += new_src.at<uchar>(i, j + r) * mask.at<double>(0, r + border);
 					}
 					else if (src.channels() == 3)
 					{
-						split(new_src, channels_);
-						double rgb_0 = channels_.at(0).ptr<double>(0)[r + border];
-						double rgb_1 = channels_.at(1).ptr<double>(0)[r + border];
-						double rgb_2 = channels_.at(2).ptr<double>(0)[r + border];
-						sum[0] += rgb_0 * mask.at<double>(0, r + border);
-						sum[1] += rgb_1 * mask.at<double>(0, r + border);
-						sum[2] += rgb_2 * mask.at<double>(0, r + border);
+						Vec3b rgb = new_src.ptr<Vec3b>(i+r)[j];
+						sum[0] += rgb[0] * mask.ptr<double>(0)[r + border]; //B
+						sum[1] += rgb[1] * mask.ptr<double>(0)[r + border]; //G
+						sum[2] += rgb[2] * mask.ptr<double>(0)[r + border]; //R
 					}
 				}
 				if (new_src.channels() == 3)
@@ -460,7 +457,7 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 	// Padding the result image
 	copyMakeBorder(res, new_src, border, border, border, border, BORDER_REPLICATE);
 
-#pragma omp parallel num_threads(4)
+#pragma omp parallel num_threads(thread_n)
 	{
 		int num_threads = omp_get_num_threads();
 		int thread_id = omp_get_thread_num();
@@ -479,23 +476,19 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 				uchar* matrix = new_src.data;
 				int height = new_src.rows;
 				int width = new_src.cols;
+//#pragma omp simd
 				for (int c = -border; c <= border; c++)
 				{
 					if (src.channels() == 1)
 					{
 						sum[0] += new_src.ptr<uchar>(i + c)[j] * mask.ptr<double>(0)[c + border];
-						//sum[0] += new_src.at<uchar>(i + c, j) * mask.at<double>(0, c + border);
 					}
 					else if (src.channels() == 3)
 					{
-						split(new_src, channels_);
-						double rgb_0 = channels_.at(0).ptr<double>(0)[c + border];
-						double rgb_1 = channels_.at(1).ptr<double>(0)[c + border];
-						double rgb_2 = channels_.at(2).ptr<double>(0)[c + border];
-						//Vec3b rgb = new_src.at<Vec3b>(i + c, j);
-						sum[0] += rgb_0 * mask.at<double>(0, c + border);
-						sum[1] += rgb_1 * mask.at<double>(0, c + border);
-						sum[2] += rgb_2 * mask.at<double>(0, c + border);
+						Vec3b rgb = new_src.ptr<Vec3b>(i)[j + c];
+						sum[0] += rgb[0] * mask.ptr<double>(0)[c + border]; //B
+						sum[1] += rgb[1] * mask.ptr<double>(0)[c + border]; //G
+						sum[2] += rgb[2] * mask.ptr<double>(0)[c + border]; //R
 					}
 				}
 				if (new_src.channels() == 3)
@@ -527,150 +520,8 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 	}
 
 	auto finish_clock = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds> (finish_clock - start_clock);
-	std::cout << "omp优化" << double(duration.count()) << std::endl;
-}
-
-void Gaussion_xy_omp_SIMD(const Mat& src, Mat& res, const int msize, const double sigma)
-{
-	Mat mask;
-	Mat new_src;
-
-	// Generating the 1D mask
-	Generate_Gaussion_Mask(mask, msize, sigma);
-
-	// Padding the source image
-	int border = (msize - 1) / 2;
-	copyMakeBorder(src, new_src, border, border, border, border, BORDER_REPLICATE);
-
-	// Initializing the result image
-	res = Mat::zeros(src.size(), src.type());
-
-	auto start_clock = std::chrono::high_resolution_clock::now();
-
-#pragma omp parallel num_threads(4)
-	{
-		int num_threads = omp_get_num_threads();
-		//std::cout << num_threads << std::endl;
-		int thread_id = omp_get_thread_num();
-
-		// Divide the rows among threads
-		int rows_per_thread = src.rows / num_threads;
-		int start_row = thread_id * rows_per_thread;
-		int end_row = (thread_id == num_threads - 1) ? src.rows : start_row + rows_per_thread;
-
-		// Process the assigned rows
-		for (int i = start_row + border; i < end_row + border; i++)
-		{
-			for (int j = border; j < src.cols + border; j++)
-			{
-				double sum[3] = { 0 };
-				for (int r = -border; r <= border; r++)
-				{
-					if (src.channels() == 1)
-					{
-						sum[0] += new_src.at<uchar>(i, j + r) * mask.at<double>(0, r + border);
-					}
-					else if (src.channels() == 3)
-					{
-						Vec3b rgb = new_src.at<Vec3b>(i, j + r);
-						sum[0] += rgb[0] * mask.at<double>(0, r + border);
-						sum[1] += rgb[1] * mask.at<double>(0, r + border);
-						sum[2] += rgb[2] * mask.at<double>(0, r + border);
-					}
-				}
-				if (new_src.channels() == 3)
-				{
-					for (int i = 0; i < 3; i++)
-					{
-						if (sum[i] < 0)
-						{
-							sum[i] = 0;
-						}
-						if (sum[i] > 255)
-						{
-							sum[i] = 255;
-						}
-					}
-				}
-
-				if (new_src.channels() == 1)
-				{
-					res.at<uchar>(i - border, j - border) = sum[0];
-				}
-				else if (new_src.channels() == 3)
-				{
-					Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
-					res.at<Vec3b>(i - border, j - border) = rgb;
-				}
-			}
-		}
-	}
-
-	// Padding the result image
-	copyMakeBorder(res, new_src, border, border, border, border, BORDER_REPLICATE);
-
-#pragma omp parallel num_threads(4)
-	{
-		int num_threads = omp_get_num_threads();
-		int thread_id = omp_get_thread_num();
-
-		// Divide the rows among threads
-		int rows_per_thread = src.rows / num_threads;
-		int start_row = thread_id * rows_per_thread;
-		int end_row = (thread_id == num_threads - 1) ? src.rows : start_row + rows_per_thread;
-
-		// Process the assigned rows
-		for (int i = start_row + border; i < end_row + border; i++)
-		{
-			for (int j = border; j < src.cols + border; j++)
-			{
-				double sum[3] = { 0 };
-				for (int c = -border; c <= border; c++)
-				{
-					if (src.channels() == 1)
-					{
-						sum[0] += new_src.at<uchar>(i + c, j) * mask.at<double>(0, c + border);
-					}
-					else if (src.channels() == 3)
-					{
-						Vec3b rgb = new_src.at<Vec3b>(i + c, j);
-						sum[0] += rgb[0] * mask.at<double>(0, c + border);
-						sum[1] += rgb[1] * mask.at<double>(0, c + border);
-						sum[2] += rgb[2] * mask.at<double>(0, c + border);
-					}
-				}
-				if (new_src.channels() == 3)
-				{
-					for (int i = 0; i < 3; i++)
-					{
-						if (sum[i] < 0)
-						{
-							sum[i] = 0;
-						}
-						if (sum[i] > 255)
-						{
-							sum[i] = 255;
-						}
-					}
-				}
-
-				if (new_src.channels() == 1)
-				{
-					res.at<uchar>(i - border, j - border) = sum[0];
-				}
-				else if (new_src.channels() == 3)
-				{
-					Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
-					res.at<Vec3b>(i - border, j - border) = rgb;
-				}
-			}
-		}
-	}
-
-	auto finish_clock = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::milliseconds> (finish_clock - start_clock);
-	std::cout << double(duration.count()) << std::endl;
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(finish_clock - start_clock);
+	std::cout << "omp优化" << double(duration.count()) << "ns" << std::endl;
 }
 
 
@@ -826,6 +677,7 @@ void Gaussion_xy_omp_SIMD(const Mat& src, Mat& res, const int msize, const doubl
 int main()
 {
 	Mat src = imread("D://parallel/woman.webp");
+	//Mat src = imread("D://parallel/test2.png");
 	Mat mask;
 	Generate_Gaussion_Mask(mask, Size(5,5), 3.5);
 	//std::cout << mask << std::endl;
@@ -836,7 +688,7 @@ int main()
 	Mat res5;
 	//res1 = imread("D://parallel/test.png");
 	//imshow("origin", res1);
-	imshow("原版", src);
+	//imshow("原版", src);
 	
 	/*std::vector<Mat> v;
 	split(src, v);
@@ -845,12 +697,45 @@ int main()
 	imshow("R", v.at(2));
 	merge(v, res2);
 	imshow("RGB", res2);*/
+	Gaussion_simp(src, res1, mask);
+
+	//Gaussion_xy(src, res2, 3, 5);
+	//imshow("3_5", res2);
 
 	xy_filter xy_filter_;
-	xy_filter_.Gaussion_xy_filter(src, res1, 5, 3.5, 8);
-	imshow("new", res1);
+	xy_filter_.Gaussion_xy_filter(src, res3, 17, 3, 16);
+	//imshow("new", res1);
 
+	//xy_filter_.Gaussion_xy_filter_SSE(src, res2, 5, 3, 16);
+	//imshow("SSE", res2);
 
+	//xy_filter_.Gaussion_xy_filter_AVX(src, res3, 5, 3 , 32);
+	//imshow("AVX", res3);
+
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32);
+	//imshow("omp_simd", res4);
+
+	
+	
+
+	//Gaussion_xy_omp(src, res5, 17, 3, 4);
+	//xy_filter_.Gaussion_xy_filter_pthread(src, res4, 5, 3, 32);
+	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res5, 5, 3, 32);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32,1);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 2);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 4);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 8);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 16);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 17, 3, 32);
+		//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 5, 3, 32);
+	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 7, 3, 32);
+	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 11, 3, 32);
+	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 17, 3, 32);
+		//xy_filter_.Gaussion_xy_filter_openmp_AVX(src, res4, 17, 3, 32);
+		//xy_filter_.Gaussion_xy_filter_SSE(src, res4, 17, 3, 16);
+		//xy_filter_.Gaussion_xy_filter_AVX(src, res5, 17, 3, 32);
+	//imshow("omp", res5);
+	//xy_filter_.Gaussion_xy_filter_openmp(src, res3, 5, 17, 16);
 	//Gaussion_simp(src, res1, mask);
 	//imshow("模糊", res1);
 	//Gaussion_xy(src, res2, 5, 3.5);

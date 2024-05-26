@@ -20,9 +20,4 @@ void generate_mask::Generate_mask(const Mat& src, double* mask, const int msize,
 		sum += g;
 	}
 
-	for (int i = 0; i < msize; i++)
-	{
-		mask[i] /= sum;
-		std::cout << mask[i] << std::endl;
-	}
 }
