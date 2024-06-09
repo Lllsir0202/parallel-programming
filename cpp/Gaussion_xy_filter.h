@@ -26,5 +26,8 @@ public:
 	//@row col refers to src rows and cols
 	//@mask refers to one_dimension window
 	//@need to use twice
+
+	void Gaussion_xy_filter_openmp_SSE_MPI(const Mat& src, Mat& res, const int msize, const double sigma, int alignment, int thread_num);
+
 	void process(uchar** matrix, uchar** tmp , uchar** res , double* mask, const int row, const int col, const int border);
 };

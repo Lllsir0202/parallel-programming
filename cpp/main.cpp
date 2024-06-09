@@ -17,6 +17,7 @@
 #include<chrono>
 #include"Gaussion_xy_filter.h"
 #include"generate_mask.h"
+#include<mpi.h>
 using namespace cv;
 
 //二维
@@ -273,6 +274,143 @@ void Gaussion_xy(const Mat& src, Mat& res, const int msize, const double sigma)
 	std::cout << "xy分离优化" << double(duration.count()) << "ns" << std::endl;
 }
 
+void Gaussion_xy_mpi(const Mat& src, Mat& res, const int msize, const double sigma)
+{
+	Mat mask;
+	Mat new_src;
+	std::vector<Mat> channels_;
+	// MPI Initialization
+	int rank, size;
+	MPI_Init(NULL, NULL);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+	// Generating the 1D mask
+	Generate_Gaussion_Mask(mask, msize, sigma);
+
+	// Padding the source image
+	int border = (msize - 1) / 2;
+	copyMakeBorder(src, new_src, border, border, border, border, BORDER_REPLICATE);
+
+	// Calculating local sub-region for each process
+	int rows_per_process = src.rows / size;
+	int start_row = rank * rows_per_process;
+	int end_row = (rank == size - 1) ? src.rows : start_row + rows_per_process;
+
+	// Local result for each process
+	Mat local_res = Mat::zeros(Size(src.cols, end_row - start_row), src.type());
+
+
+	auto start_clock = std::chrono::high_resolution_clock::now();
+
+	// Process the assigned rows by each process
+	for (int i = start_row + border; i < end_row + border; i++)
+	{
+		for (int j = border; j < src.cols + border; j++)
+		{
+			double sum[3] = { 0 };
+			for (int r = -border; r <= border; r++)
+			{
+				// Local computation within the assigned sub-region
+				if (src.channels() == 1)
+				{
+					sum[0] += new_src.ptr<uchar>(i)[j + r] * mask.ptr<double>(0)[r + border];
+				}
+				else if (src.channels() == 3)
+				{
+					Vec3b rgb = new_src.ptr<Vec3b>(i + r)[j];
+					sum[0] += rgb[0] * mask.ptr<double>(0)[r + border]; //B
+					sum[1] += rgb[1] * mask.ptr<double>(0)[r + border]; //G
+					sum[2] += rgb[2] * mask.ptr<double>(0)[r + border]; //R
+				}
+			}
+
+			// Update local result
+			if (new_src.channels() == 1)
+			{
+				local_res.at<uchar>(i - start_row - border, j - border) = sum[0];
+			}
+			else if (new_src.channels() == 3)
+			{
+				Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
+				local_res.at<Vec3b>(i - start_row - border, j - border) = rgb;
+			}
+		}
+	}
+
+	Mat tmp = Mat::zeros(Size(src.size()), src.type());
+	for (int i = border; i < src.rows + border; i++)
+	{
+		for (int j = border; j < src.cols + border; j++)
+		{
+			double sum[3] = { 0 };
+			uchar* matrix = new_src.data;
+			int height = new_src.rows;
+			int width = new_src.cols;
+			//#pragma omp simd
+			for (int c = -border; c <= border; c++)
+			{
+				if (src.channels() == 1)
+				{
+					sum[0] += new_src.ptr<uchar>(i + c)[j] * mask.ptr<double>(0)[c + border];
+				}
+				else if (src.channels() == 3)
+				{
+					Vec3b rgb = new_src.ptr<Vec3b>(i)[j + c];
+					sum[0] += rgb[0] * mask.ptr<double>(0)[c + border]; //B
+					sum[1] += rgb[1] * mask.ptr<double>(0)[c + border]; //G
+					sum[2] += rgb[2] * mask.ptr<double>(0)[c + border]; //R
+				}
+			}
+			if (new_src.channels() == 3)
+			{
+				for (int i = 0; i < 3; i++)
+				{
+					if (sum[i] < 0)
+					{
+						sum[i] = 0;
+					}
+					if (sum[i] > 255)
+					{
+						sum[i] = 255;
+					}
+				}
+			}
+
+			if (new_src.channels() == 1)
+			{
+				tmp.at<uchar>(i - border, j - border) = sum[0];
+			}
+			else if (new_src.channels() == 3)
+			{
+				Vec3b rgb = { static_cast<uchar>(sum[0]), static_cast<uchar>(sum[1]), static_cast<uchar>(sum[2]) };
+				tmp.at<Vec3b>(i - border, j - border) = rgb;
+			}
+		}
+	}
+
+	// Gather results from all processes
+	Mat global_res;
+	if (rank == 0)
+	{
+		global_res = Mat::zeros(src.size(), src.type());
+	}
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Gather(local_res.data, local_res.total() * local_res.elemSize(), MPI_BYTE,
+		global_res.data, local_res.total() * local_res.elemSize(), MPI_BYTE,
+		0, MPI_COMM_WORLD);
+
+	auto finish_clock = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(finish_clock - start_clock);
+
+	if (rank == 0)
+	{
+		std::cout << "mpi优化" << double(duration.count()) << "ns" << std::endl;
+		res = global_res.clone();
+	}
+
+	MPI_Finalize();
+}
 
 void Gaussion_xy_SSE(const Mat& src, Mat& res, const int msize, const double sigma)
 {
@@ -671,7 +809,29 @@ void Gaussion_xy_omp(const Mat& src, Mat& res, const int msize, const double sig
 //}
 
 
+void mpi()
+{
 
+	// MPI Initialization
+	int rank, size;
+	MPI_Init(NULL, NULL);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+	auto start_clock = std::chrono::high_resolution_clock::now();
+
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	auto finish_clock = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(finish_clock - start_clock);
+
+	if (rank == 0)
+	{
+		std::cout << "mpi" << double(duration.count()) << "ns" << std::endl;
+	}
+
+	MPI_Finalize();
+}
 
 
 int main()
@@ -697,43 +857,49 @@ int main()
 	imshow("R", v.at(2));
 	merge(v, res2);
 	imshow("RGB", res2);*/
-	Gaussion_simp(src, res1, mask);
+	//Gaussion_simp(src, res1, mask);
 
-	//Gaussion_xy(src, res2, 3, 5);
+		//Gaussion_xy(src, res2, 17, 3);
 	//imshow("3_5", res2);
-
-	xy_filter xy_filter_;
-	xy_filter_.Gaussion_xy_filter(src, res3, 17, 3, 16);
+		//Gaussion_xy(src, res2, 3, 5);
+	//Gaussion_xy_mpi(src, res1, 3, 5);
+	//Gaussion_xy_mpi(res1, res2, 3, 5);
+	//imshow("111", res1);
+	//imshow("222", res2);
+	//imshow("111", res1);
+	mpi();
+		//xy_filter xy_filter_;
+		//xy_filter_.Gaussion_xy_filter(src, res3, 17, 3, 16);
 	//imshow("new", res1);
 
-	//xy_filter_.Gaussion_xy_filter_SSE(src, res2, 5, 3, 16);
+		//xy_filter_.Gaussion_xy_filter_SSE(src, res2, 17, 3, 16);
 	//imshow("SSE", res2);
 
-	//xy_filter_.Gaussion_xy_filter_AVX(src, res3, 5, 3 , 32);
+		//xy_filter_.Gaussion_xy_filter_AVX(src, res3, 17, 3 , 32);
 	//imshow("AVX", res3);
 
-	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32);
-	//imshow("omp_simd", res4);
 
 	
 	
 
 	//Gaussion_xy_omp(src, res5, 17, 3, 4);
-	//xy_filter_.Gaussion_xy_filter_pthread(src, res4, 5, 3, 32);
-	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res5, 5, 3, 32);
-	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32,1);
+		/*xy_filter_.Gaussion_xy_filter_pthread(src, res4, 17, 3, 32);
+		xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res5, 17, 3, 32);
+		xy_filter_.Gaussion_xy_filter_openmp(src, res4, 17, 3, 32,1);*/
+	//xy_filter_.Gaussion_xy_filter_openmp_SSE_MPI(src, res4, 5, 3, 32);
 	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 2);
 	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 4);
 	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 8);
 	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 5, 3, 32, 16);
 	//xy_filter_.Gaussion_xy_filter_openmp(src, res4, 17, 3, 32);
-		//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 5, 3, 32);
+		//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 17, 3, 32);
 	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 7, 3, 32);
 	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 11, 3, 32);
 	//xy_filter_.Gaussion_xy_filter_openmp_SSE(src, res4, 17, 3, 32);
-		//xy_filter_.Gaussion_xy_filter_openmp_AVX(src, res4, 17, 3, 32);
-		//xy_filter_.Gaussion_xy_filter_SSE(src, res4, 17, 3, 16);
-		//xy_filter_.Gaussion_xy_filter_AVX(src, res5, 17, 3, 32);
+		/*xy_filter_.Gaussion_xy_filter_openmp_AVX(src, res4, 17, 3, 32);
+		xy_filter_.Gaussion_xy_filter_SSE(src, res4, 17, 3, 16);
+		xy_filter_.Gaussion_xy_filter_AVX(src, res5, 17, 3, 32);*/
+		//xy_filter_.Gaussion_xy_filter_openmp_SSE_MPI(src, res5, 17, 3, 32,8);
 	//imshow("omp", res5);
 	//xy_filter_.Gaussion_xy_filter_openmp(src, res3, 5, 17, 16);
 	//Gaussion_simp(src, res1, mask);
